@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ WPD_CONTENT_TYPE_FILE = 2
 WPD_CONTENT_TYPE_DIRECTORY = 1
 
 _cached_devices: list[Any] | None = None
+_cache_thread_id: int | None = None
 
 
 @dataclass
@@ -36,23 +38,40 @@ class PhoneFile:
     folder_path: str
 
 
-def reset_device_cache() -> None:
+def reset_device_cache(*, close_sessions: bool = False) -> None:
     """Drop cached MTP handles (call before re-scanning devices)."""
-    global _cached_devices
+    global _cached_devices, _cache_thread_id
+    if close_sessions and _cached_devices:
+        for device in _cached_devices:
+            wpd_device = getattr(device, "_device", None)
+            if wpd_device is None:
+                continue
+            try:
+                wpd_device.Close()
+            except Exception:
+                pass
     _cached_devices = None
+    _cache_thread_id = None
 
 
 def refresh_open_device(index: int) -> Any:
     """Reconnect to the phone and return a fresh device handle."""
-    reset_device_cache()
+    reset_device_cache(close_sessions=True)
     return open_device(index)
 
 
 def get_devices() -> list[Any]:
-    """Return one stable list of open device handles for this process."""
-    global _cached_devices
+    """Return one stable list of open device handles for this process/thread."""
+    global _cached_devices, _cache_thread_id
+    thread_id = threading.get_ident()
+    if _cached_devices is not None and _cache_thread_id != thread_id:
+        # Streamlit reruns may execute on a different thread; COM handles are not portable.
+        _cached_devices = None
+        _cache_thread_id = None
+        win_access.reset_com_state()
     if _cached_devices is None:
         _cached_devices = win_access.get_portable_devices()
+        _cache_thread_id = thread_id
     return _cached_devices
 
 

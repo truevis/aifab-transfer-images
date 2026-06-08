@@ -146,6 +146,14 @@ WPD_DELETE_WITH_RECURSION = 1
 DEVICE_MANAGER: Any | None = None
 
 
+def reset_com_state() -> None:
+    """Drop COM singletons so the next call re-initializes on the current thread."""
+    global DEVICE_MANAGER
+    DEVICE_MANAGER = None
+    with contextlib.suppress(Exception):
+        comtypes.CoUninitialize()
+
+
 # -------------------------------------------------------------------------------------------------
 class PortableDeviceContent:
     """Class for one file, directory or storage with it's properties.

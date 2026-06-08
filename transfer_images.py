@@ -7,6 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from transfer.errors import is_disk_full_error
 from transfer.events import TransferEvent, append_event
 from transfer.importer import ImportStats, import_files
 from transfer.mtp_client import (
@@ -159,7 +160,7 @@ def _build_settings(args: argparse.Namespace) -> TransferSettings:
 
 def _open_selected_device(args: argparse.Namespace):
     if args.refresh_devices:
-        reset_device_cache()
+        reset_device_cache(close_sessions=True)
     devices = list_devices()
     if not devices:
         print("No MTP phone detected. Connect the device in File transfer mode.", file=sys.stderr)
@@ -200,7 +201,7 @@ def _counts_toward_limit(event: TransferEvent) -> bool:
 
 def _cmd_list_devices(args: argparse.Namespace) -> int:
     if args.refresh_devices:
-        reset_device_cache()
+        reset_device_cache(close_sessions=True)
     devices = list_devices()
     if not devices:
         print("No MTP phone detected.")
@@ -231,6 +232,7 @@ def _cmd_import(args: argparse.Namespace) -> int:
     devices, device = _open_selected_device(args)
     log: list[str] = []
     stats = ImportStats()
+    disk_full_stopped = False
     try:
         folders = _resolve_folders(device, args)
         settings = _build_settings(args)
@@ -243,6 +245,8 @@ def _cmd_import(args: argparse.Namespace) -> int:
         processed = 0
         for event, stats in import_files(device, folders, settings):
             _echo_event(log, event, quiet=args.quiet)
+            if event.action == "STOPPED" and is_disk_full_error(event.reason):
+                disk_full_stopped = True
             if args.limit and _counts_toward_limit(event):
                 processed += 1
                 if processed >= args.limit:
@@ -259,6 +263,16 @@ def _cmd_import(args: argparse.Namespace) -> int:
         return 1
     finally:
         close_device(device)
+
+    if disk_full_stopped:
+        print(
+            f"\nImport stopped — target drive is full. "
+            f"Scanned {stats.scanned}, copied {stats.copied}, "
+            f"skipped existing {stats.skipped_existing}, skipped filter {stats.skipped_filter}, "
+            f"errors {stats.errors}",
+            file=sys.stderr,
+        )
+        return 1
 
     print(
         f"\nDone — scanned {stats.scanned}, copied {stats.copied}, "

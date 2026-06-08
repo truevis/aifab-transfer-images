@@ -21,6 +21,11 @@ class TransferEvent:
                 f"         ->  {self.dest}"
             )
         if self.reason:
+            if self.dest:
+                return (
+                    f"[{self.timestamp}] {self.action}  {self.source}\n"
+                    f"         ->  {self.dest}  ({self.reason})"
+                )
             return f"[{self.timestamp}] {self.action}  {self.source}  ({self.reason})"
         return f"[{self.timestamp}] {self.action}  {self.source}"
 

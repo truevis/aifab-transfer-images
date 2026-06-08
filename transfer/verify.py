@@ -7,10 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from transfer.datetime_meta import resolve_capture_datetime
+from transfer.stop import ShouldStop, is_cancelled
 from transfer.events import TransferEvent
 from transfer.filters import filter_reason
 from transfer.mtp_client import iter_folder_files
 from transfer.locate import find_transferred_path
+from transfer.rename import destination_path
 from transfer.settings import TransferSettings
 
 
@@ -28,12 +31,19 @@ def verify_transfer(
     folders: list[str],
     settings: TransferSettings,
     fingerprint: str,
+    *,
+    should_stop: ShouldStop = None,
 ) -> Iterator[TransferEvent]:
     missing_count = 0
+    mismatch_count = 0
     verified_count = 0
     error_count = 0
 
     for folder_name in folders:
+        if is_cancelled(should_stop):
+            yield TransferEvent(action="STOPPED", source="Verify stopped", reason="cancelled by user")
+            yield TransferEvent(action="_RESULT", source="blocked", reason=str(missing_count))
+            return
         folder_files = list(iter_folder_files(device, folder_name))
         if not folder_files:
             yield TransferEvent(
@@ -45,6 +55,10 @@ def verify_transfer(
         folder_ok = 0
         importable_count = 0
         for phone_file in folder_files:
+            if is_cancelled(should_stop):
+                yield TransferEvent(action="STOPPED", source="Verify stopped", reason="cancelled by user")
+                yield TransferEvent(action="_RESULT", source="blocked", reason=str(missing_count))
+                return
             reason = filter_reason(
                 phone_file.display_path,
                 phone_file.filename,
@@ -56,12 +70,27 @@ def verify_transfer(
                 continue
 
             importable_count += 1
+            capture_dt = resolve_capture_datetime(
+                phone_file.filename,
+                fallback=phone_file.date_modified,
+            )
             dest = find_transferred_path(
                 settings.dest_root,
                 phone_file.filename,
-                phone_file.date_modified,
+                capture_dt,
                 settings,
             )
+            if dest is None:
+                dest = destination_path(
+                    settings.dest_root,
+                    phone_file.filename,
+                    capture_dt,
+                    rename_enabled=settings.rename_enabled,
+                    template=settings.rename_template,
+                    ext_lower=settings.ext_lower,
+                )
+                if not dest.exists():
+                    dest = None
 
             if dest is None:
                 missing_count += 1
@@ -73,14 +102,13 @@ def verify_transfer(
                 continue
 
             if not _size_matches(dest, phone_file.size):
-                missing_count += 1
+                mismatch_count += 1
                 yield TransferEvent(
-                    action="FAIL",
+                    action="WARN",
                     source=phone_file.display_path,
                     dest=str(dest),
-                    reason="size mismatch at destination",
+                    reason="size mismatch at destination (file found)",
                 )
-                continue
 
             folder_ok += 1
             verified_count += 1
@@ -91,10 +119,14 @@ def verify_transfer(
         )
 
     if missing_count == 0 and error_count == 0:
-        yield TransferEvent(
-            action="READY",
-            source=f"All importable files verified at {settings.dest_root}",
-        )
+        if mismatch_count:
+            ready_msg = (
+                f"All importable files found at {settings.dest_root} "
+                f"({mismatch_count} size mismatch warning(s))"
+            )
+        else:
+            ready_msg = f"All importable files verified at {settings.dest_root}"
+        yield TransferEvent(action="READY", source=ready_msg)
         status = "ready"
     else:
         yield TransferEvent(

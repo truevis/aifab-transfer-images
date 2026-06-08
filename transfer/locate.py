@@ -38,6 +38,9 @@ def find_transferred_path(
             continue
         if settings.rename_enabled:
             matches = sorted(month_dir.glob(f"{stem}-*{ext}"))
+            if not matches:
+                original = month_dir / f"{stem}{ext}"
+                matches = [original] if original.exists() else []
         else:
             candidate = month_dir / f"{stem}{ext}"
             matches = [candidate] if candidate.exists() else []

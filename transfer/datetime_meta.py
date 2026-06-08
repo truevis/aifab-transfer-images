@@ -11,16 +11,21 @@ from PIL.ExifTags import Base as ExifBase
 
 from transfer.filters import is_video_file
 
-_VIDEO_STEM_PATTERN = re.compile(r"_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$")
+_VIDEO_STEM_PATTERNS = (
+    re.compile(r"_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$"),
+    re.compile(r"^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$"),
+)
 
 
 def capture_datetime_from_filename(filename: str) -> datetime | None:
-    """Parse YYYYMMDD_HHMMSS from Android-style video names (e.g. VID_20230301_200226)."""
-    match = _VIDEO_STEM_PATTERN.search(Path(filename).stem)
-    if not match:
-        return None
-    year, month, day, hour, minute, second = (int(part) for part in match.groups())
-    return datetime(year, month, day, hour, minute, second)
+    """Parse YYYYMMDD_HHMMSS from Android-style video names."""
+    stem = Path(filename).stem
+    for pattern in _VIDEO_STEM_PATTERNS:
+        match = pattern.search(stem)
+        if match:
+            year, month, day, hour, minute, second = (int(part) for part in match.groups())
+            return datetime(year, month, day, hour, minute, second)
+    return None
 
 
 def resolve_capture_datetime(
