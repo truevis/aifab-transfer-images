@@ -40,7 +40,7 @@ class TestRename(unittest.TestCase):
             template=DEFAULT_TEMPLATE,
             ext_lower=True,
         )
-        self.assertEqual(result, "IMG_1234-2026-06-08_19.14.27.jpg")
+        self.assertEqual(result, "IMG_1234-2026-06-08_19_14_27.jpg")
 
     def test_rename_disabled_keeps_original_stem(self) -> None:
         dt = datetime(2026, 6, 8, 19, 14, 27)
@@ -63,7 +63,7 @@ class TestRename(unittest.TestCase):
         )
         self.assertEqual(
             dest,
-            Path(r"D:\Album-F\2026-06\IMG_1234-2026-06-08_19.14.27.jpg"),
+            Path(r"D:\Album-F\2026-06\IMG_1234-2026-06-08_19_14_27.jpg"),
         )
 
     def test_video_template_matches_reference_example(self) -> None:
@@ -75,7 +75,7 @@ class TestRename(unittest.TestCase):
             template=DEFAULT_TEMPLATE,
             ext_lower=True,
         )
-        self.assertEqual(result, "VID_20230301_200226-2023-03-01_20.02.26.mp4")
+        self.assertEqual(result, "VID_20230301_200226-2023-03-01_20_02_26.mp4")
 
     def test_capture_datetime_from_video_filename(self) -> None:
         parsed = capture_datetime_from_filename("VID_20230301_200226.mp4")
@@ -94,7 +94,7 @@ class TestRename(unittest.TestCase):
             template=DEFAULT_TEMPLATE,
             ext_lower=True,
         )
-        self.assertEqual(result, "20260508_162550-2026-05-08_16.25.50.mp4")
+        self.assertEqual(result, "20260508_162550-2026-05-08_16_25_50.mp4")
 
     def test_resolve_capture_datetime_prefers_video_filename(self) -> None:
         fallback = datetime(2020, 1, 1, 0, 0, 0)
@@ -142,7 +142,7 @@ class TestLocate(unittest.TestCase):
             root = Path(tmp)
             month_dir = root / "2026-06"
             month_dir.mkdir()
-            transferred = month_dir / "IMG_1234-2026-06-08_19.14.27.jpg"
+            transferred = month_dir / "IMG_1234-2026-06-08_19_14_27.jpg"
             transferred.write_bytes(b"test")
             found = find_transferred_path(
                 root,
@@ -185,12 +185,12 @@ class TestPreview(unittest.TestCase):
 
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].original_name, "IMG_1234.jpg")
-        self.assertEqual(candidates[0].new_name, "IMG_1234-2026-06-08_19.14.27.jpg")
+        self.assertEqual(candidates[0].new_name, "IMG_1234-2026-06-08_19_14_27.jpg")
         self.assertFalse(candidates[0].already_exists)
         self.assertTrue(candidates[0].dest_path.endswith(
-            r"2026-06\IMG_1234-2026-06-08_19.14.27.jpg"
+            r"2026-06\IMG_1234-2026-06-08_19_14_27.jpg"
         ) or candidates[0].dest_path.endswith(
-            "2026-06/IMG_1234-2026-06-08_19.14.27.jpg"
+            "2026-06/IMG_1234-2026-06-08_19_14_27.jpg"
         ))
 
     def test_list_transfer_candidates_marks_existing_files(self) -> None:
@@ -363,11 +363,11 @@ class TestEvents(unittest.TestCase):
         event = TransferEvent(
             action="ERROR",
             source="DCIM/Camera/20260508_162550.mp4",
-            dest=r"D:\Album-F\2026-05\20260508_162550-2026-05-08_16.25.50.mp4",
+            dest=r"D:\Album-F\2026-05\20260508_162550-2026-05-08_16_25_50.mp4",
             reason="download failed: No space left on device",
         )
         formatted = event.format_line()
-        self.assertIn("20260508_162550-2026-05-08_16.25.50.mp4", formatted)
+        self.assertIn("20260508_162550-2026-05-08_16_25_50.mp4", formatted)
         self.assertIn("download failed", formatted)
 
 

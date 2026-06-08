@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_DEST = r"D:\Album-F"
-DEFAULT_TEMPLATE = "$F-$Y-$M-$D_$H.$N.$S"
+DEFAULT_TEMPLATE = "$F-$Y-$M-$D_$H_$N_$S"
 DEFAULT_FOLDERS = ("Camera", "OpenCamera", "Expert RAW")
 
 

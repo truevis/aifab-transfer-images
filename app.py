@@ -318,9 +318,10 @@ def _render_destination_settings() -> Path:
 def _render_rename_settings() -> tuple[bool, str]:
     st.subheader("File Names")
     rename_enabled = st.checkbox("Rename files", value=True, key="rename_enabled")
-    st.caption("Template: ＄F-＄Y-＄M-＄D_＄H.＄N.＄S")
-    st.caption("Photo example: IMG_1234-2026-06-08_19.14.27.jpg")
-    st.caption("Video example: VID_20230301_200226-2023-03-01_20.02.26.mp4")
+    st.caption("Template: ＄F-＄Y-＄M-＄D_＄H_＄N_＄S")
+    st.caption("＄F original name · ＄Y-＄M-＄D capture date · ＄H_＄N_＄S time (hour_minute_second)")
+    st.caption("Photo example: IMG_1234-2026-06-08_19_14_27.jpg")
+    st.caption("Video example: VID_20230301_200226-2023-03-01_20_02_26.mp4")
     st.caption("Ext case: lower")
     return rename_enabled, DEFAULT_TEMPLATE
 

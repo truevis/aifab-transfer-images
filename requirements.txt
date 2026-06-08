@@ -4,5 +4,8 @@ streamlit
 # Image metadata (EXIF)
 Pillow
 
+# Video perceptual hashing (misc/de-duplicate_videos.py)
+imagehash
+
 # Windows MTP / WPD API (mtp package vendored in ./mtp/)
 comtypes
