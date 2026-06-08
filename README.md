@@ -14,8 +14,6 @@ The primary interface is the command-line script [`transfer_images.py`](transfer
 
 ```powershell
 cd C:\GitHub\aifab-transfer-images
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 ```
@@ -24,10 +22,9 @@ The `mtp` package is vendored in [`mtp/`](mtp/) because the upstream GitHub pack
 
 ## CLI usage
 
-Activate the virtual environment, then run `transfer_images.py`:
+Run `transfer_images.py` from the project root:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
 python transfer_images.py --help
 ```
 
@@ -113,8 +110,7 @@ python transfer_images.py --device 1 import --dest D:\Album-F
 ## Streamlit UI (optional)
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-streamlit run app.py
+python -m streamlit run app.py
 ```
 
 The sidebar mirrors the CLI options. Use **Refresh devices**, **Start Import**, **Verify Transfer**, then confirm and **Delete from Phone**. Do not run the CLI and Streamlit at the same time.
@@ -122,7 +118,6 @@ The sidebar mirrors the CLI options. Use **Refresh devices**, **Start Import**, 
 ## Update dependencies
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 ```
