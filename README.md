@@ -4,6 +4,8 @@ Transfer photos and videos from a USB-connected Android phone (MTP) to a local d
 
 The primary interface is the command-line script [`transfer_images.py`](transfer_images.py). A Streamlit UI ([`app.py`](app.py)) is also available.
 
+![Import Photos and Videos — Streamlit UI](./img/screenshot.png)
+
 ## Requirements
 
 - Windows 10/11
