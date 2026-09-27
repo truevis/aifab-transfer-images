@@ -15,7 +15,6 @@ from transfer.events import TransferEvent
 from transfer.importer import ImportStats, import_files
 from transfer.mtp_client import (
     close_device,
-    default_folder_selection,
     list_dcim_folders,
     list_devices,
     open_device,
@@ -296,8 +295,10 @@ def _activity_badge_markdown(mode: str, outcome: str | None) -> str:
         return ":red-badge[:material/error: Error]"
     if outcome == "success":
         return ":green-badge[:material/check_circle: Complete]"
-    if outcome == "warning":
+    if outcome == "stopped":
         return ":orange-badge[:material/warning: Stopped]"
+    if outcome == "warning":
+        return ":orange-badge[:material/warning: Incomplete]"
     if outcome == "info":
         return ":blue-badge[:material/info: Done]"
     badges = {
@@ -392,6 +393,21 @@ def _invalidate_verify() -> None:
     st.session_state.verify_missing_count = 0
 
 
+def _default_photos_folder(available: list[str]) -> list[str]:
+    """Select the phone's default photos folder when it is present."""
+    for name in ("Camera", "OpenCamera"):
+        if name in available:
+            return [name]
+    return []
+
+
+def _apply_default_folder_selection(available: list[str]) -> None:
+    if st.session_state.get("folder_default_applied") or not available:
+        return
+    st.session_state.folder_select = _default_photos_folder(available)
+    st.session_state.folder_default_applied = True
+
+
 def _render_source_settings() -> tuple[int, list[str], str, bool, bool, bool]:
     st.subheader("Source")
     if st.button("Refresh devices", key="refresh_devices"):
@@ -399,6 +415,7 @@ def _render_source_settings() -> tuple[int, list[str], str, bool, bool, bool]:
         st.session_state.devices_scanned = True
         st.session_state.dcim_folders = []
         st.session_state.dcim_folders_error = None
+        st.session_state.folder_default_applied = False
         _invalidate_verify()
 
     devices = st.session_state.device_options
@@ -414,17 +431,13 @@ def _render_source_settings() -> tuple[int, list[str], str, bool, bool, bool]:
         if device_index != st.session_state.last_device_index:
             _try_load_dcim_folders(device_index)
             st.session_state.last_device_index = device_index
-            st.session_state.folder_select = default_folder_selection(
-                st.session_state.dcim_folders
-            )
+            st.session_state.folder_default_applied = False
+            _apply_default_folder_selection(st.session_state.dcim_folders)
             _invalidate_verify()
 
     if not st.session_state.dcim_folders and devices and not st.session_state.dcim_folders_error:
         _try_load_dcim_folders(device_index)
-        if "folder_select" not in st.session_state:
-            st.session_state.folder_select = default_folder_selection(
-                st.session_state.dcim_folders
-            )
+        _apply_default_folder_selection(st.session_state.dcim_folders)
 
     if st.session_state.dcim_folders_error:
         st.error(
@@ -434,8 +447,7 @@ def _render_source_settings() -> tuple[int, list[str], str, bool, bool, bool]:
         )
 
     available = st.session_state.dcim_folders
-    if "folder_select" not in st.session_state:
-        st.session_state.folder_select = default_folder_selection(available)
+    _apply_default_folder_selection(available)
     folders = st.multiselect(
         "DCIM folders",
         available,
@@ -687,7 +699,7 @@ def _import_worker(
                 progress=min(stats.scanned / max(total_files, 1), 1.0),
                 progress_text="Import stopped by user",
                 show_progress=False,
-                outcome="warning",
+                outcome="stopped",
             )
         elif disk_full_stopped:
             op.invalidate_verify = True
@@ -698,7 +710,7 @@ def _import_worker(
                 progress=min(stats.scanned / max(total_files, 1), 1.0),
                 progress_text="Import stopped — target drive is full",
                 show_progress=True,
-                outcome="warning",
+                outcome="stopped",
             )
             op.error = (
                 "Import stopped because the destination drive is full. "
@@ -722,7 +734,7 @@ def _import_worker(
                     progress=1.0,
                     progress_text="Stopped",
                     show_progress=False,
-                    outcome="warning",
+                    outcome="stopped",
                 )
             elif verify_status == "ready":
                 op.set_activity(
@@ -848,7 +860,7 @@ def _verify_worker(
                 progress=min(checked / max(checked + 1, 1), 1.0),
                 progress_text="Verify stopped",
                 show_progress=False,
-                outcome="warning",
+                outcome="stopped",
             )
         elif op.verify_status == "ready":
             op.set_activity(
@@ -971,7 +983,7 @@ def _delete_worker(
                 progress=min(processed / max(total_files, 1), 1.0),
                 progress_text="Delete stopped by user",
                 show_progress=False,
-                outcome="warning",
+                outcome="stopped",
             )
         else:
             op.set_activity(
@@ -1051,21 +1063,25 @@ def _render_delete_metrics(stats: DeleteStats | None = None) -> None:
     cols[3].metric("Errors", stats.errors)
 
 
-def _render_status_metrics(stats: ImportStats | None = None) -> None:
-    stats = stats if stats is not None else st.session_state.import_stats
-    cols = st.columns(6)
-    cols[0].metric("Scanned", stats.scanned)
-    cols[1].metric("Copied", stats.copied)
-    cols[2].metric("Skip existing", stats.skipped_existing)
-    cols[3].metric("Skip filter", stats.skipped_filter)
-    cols[4].metric("Errors", stats.errors)
+def _verify_metric_value() -> str:
     status = st.session_state.verify_status
     if status == "ready":
-        cols[5].metric("Verify", "Ready")
-    elif status == "blocked":
-        cols[5].metric("Verify", f"Blocked ({st.session_state.verify_missing_count})")
-    else:
-        cols[5].metric("Verify", "Not run")
+        return "Ready"
+    if status == "blocked":
+        return f"Blocked ({st.session_state.verify_missing_count})"
+    return "Not run"
+
+
+def _render_status_metrics(stats: ImportStats | None = None) -> None:
+    stats = stats if stats is not None else st.session_state.import_stats
+    top = st.columns(3)
+    top[0].metric("Scanned", stats.scanned)
+    top[1].metric("Copied", stats.copied)
+    top[2].metric("Skip existing", stats.skipped_existing)
+    bottom = st.columns(3)
+    bottom[0].metric("Skip filter", stats.skipped_filter)
+    bottom[1].metric("Errors", stats.errors)
+    bottom[2].metric("Verify", _verify_metric_value())
 
 
 def _preview_worker(
@@ -1110,11 +1126,19 @@ def _preview_worker(
                 progress=0.0,
                 progress_text="Preview stopped",
                 show_progress=False,
-                outcome="warning",
+                outcome="stopped",
             )
             return
         op.transfer_candidates = candidates
         op.preview_fingerprint = settings_fingerprint(settings, device_name, folders)
+        _append_op_event(
+            op,
+            TransferEvent(
+                action="PREVIEW",
+                source="Transfer list",
+                reason=f"{len(candidates)} importable file(s)",
+            ),
+        )
         if candidates:
             new_count = sum(1 for candidate in candidates if not candidate.already_exists)
             detail = (
@@ -1224,6 +1248,28 @@ def _render_verbose_log() -> None:
     st.code(log_text or "(no log entries yet)", language=None)
 
 
+def _render_about() -> None:
+    with st.expander("About"):
+        st.markdown(
+            """
+**Directions**
+
+1. Connect the phone by USB, unlock it, and set USB mode to **File transfer**.
+2. In the sidebar, click **Refresh devices**, choose the phone, and select the DCIM folders to copy.
+3. Set the destination folder. Copies are stored in `YYYY-MM` subfolders.
+4. Adjust filters, renaming, and **Skip existing files** as needed.
+5. Click **Preview transfer list** to review what will be copied.
+6. Click **Start Import**. A successful import also checks that destination files exist and match sizes.
+7. Click **Verify Transfer** again if settings change or you want to recheck.
+8. Delete from the phone only after verify succeeds and you check the backup confirmation. **Delete from Phone** removes the selected folders from the device.
+
+Only one program should use the phone at a time. Close other apps that are reading the phone, including the command-line transfer script, before you import.
+
+**Use at your own risk.** This app copies media and can permanently delete folders from your phone. Confirm the files are on the destination drive before you delete anything. You are responsible for your photos and videos.
+            """.strip()
+        )
+
+
 def main() -> None:
     st.set_page_config(page_title="Import Photos and Videos", layout="wide")
     _init_session_state()
@@ -1238,6 +1284,7 @@ def main() -> None:
         dest_root = _render_destination_settings()
         rename_enabled, rename_template = _render_rename_settings()
         skip_existing = _render_import_settings()
+        _render_about()
 
     settings = _build_settings(
         dest_root,

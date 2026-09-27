@@ -71,7 +71,7 @@ python transfer_images.py delete --confirm-backup
 | `--dest PATH` | `D:\Album-F` | Destination root folder |
 | `--folders NAME ...` | Camera, OpenCamera, Expert RAW | DCIM folders to process |
 | `--rename` / `--no-rename` | rename on | Apply rename template |
-| `--template` | `$F-$Y-$M-$D_$H.$N.$S` | Rename pattern |
+| `--template` | `$F-$Y-$M-$D_$H_$N_$S` | Rename pattern |
 | `--ext-lower` / `--no-ext-lower` | lower on | Lowercase file extensions |
 | `--skip-existing` / `--no-skip-existing` | skip on | Skip files already at destination |
 | `--skip-trashed` / `--no-skip-trashed` | skip on | Skip trashed files |
@@ -105,9 +105,10 @@ python transfer_images.py --device 1 import --dest D:\Album-F
 ### Defaults
 
 - Skip existing files, trashed files, thumbnails, and screenshots
-- Rename template: `$F-$Y-$M-$D_$H.$N.$S` (lowercase extension)
+- Rename template: `$F-$Y-$M-$D_$H_$N_$S` (lowercase extension)
 - Month subfolders: `YYYY-MM`
-- Example renamed file: `IMG_1234-2026-06-08_19.14.27.jpg` → `D:\Album-F\2026-06\IMG_1234-2026-06-08_19.14.27.jpg`
+- Photo example: `IMG_1234-2026-06-08_19_14_27.jpg` → `D:\Album-F\2026-06\IMG_1234-2026-06-08_19_14_27.jpg`
+- Video example: `VID_20230301_200226-2023-03-01_20_02_26.mp4`
 
 ## Streamlit UI (optional)
 
@@ -115,7 +116,7 @@ python transfer_images.py --device 1 import --dest D:\Album-F
 python -m streamlit run app.py
 ```
 
-The sidebar mirrors the CLI options. Use **Refresh devices**, **Start Import**, **Verify Transfer**, then confirm and **Delete from Phone**. Do not run the CLI and Streamlit at the same time.
+The sidebar mirrors the CLI options. Typical order: **Refresh devices**, **Preview transfer list**, **Start Import**, **Verify Transfer**, then confirm and **Delete from Phone**. Import, preview, and verify can be stopped while they are running. Do not run the CLI and Streamlit at the same time.
 
 ## Update dependencies
 

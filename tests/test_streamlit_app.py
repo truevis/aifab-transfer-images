@@ -441,10 +441,7 @@ class TestStreamlitApp(unittest.TestCase):
         self.assertFalse(at.exception)
 
         folder_select = next(w for w in at.multiselect if w.label == "DCIM folders")
-        self.assertIn("Camera", folder_select.value)
-        self.assertIn("OpenCamera", folder_select.value)
-        self.assertIn("Expert RAW", folder_select.value)
-        self.assertNotIn("Facebook", folder_select.value)
+        self.assertEqual(folder_select.value, ["Camera"])
 
     def test_delete_button_disabled_without_verify(
         self,
