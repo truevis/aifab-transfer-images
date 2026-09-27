@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import threading
-import tkinter as tk
 from datetime import timedelta
 from pathlib import Path
-from tkinter import filedialog
 
 import streamlit as st
 
@@ -342,19 +340,6 @@ def _paint_activity(
         metrics_slot.empty()
 
 
-def _choose_destination_folder() -> None:
-    root = tk.Tk()
-    root.withdraw()
-    root.wm_attributes("-topmost", 1)
-    try:
-        selected = filedialog.askdirectory()
-    finally:
-        root.destroy()
-    if selected:
-        st.session_state.dest_input = selected
-        _invalidate_verify()
-
-
 def _refresh_devices(*, force_reconnect: bool = False) -> None:
     try:
         if force_reconnect:
@@ -465,7 +450,6 @@ def _render_source_settings() -> tuple[int, list[str], str, bool, bool, bool]:
 def _render_destination_settings() -> Path:
     st.subheader("Destination")
     dest_value = st.text_input("Folder", value=DEFAULT_DEST, key="dest_input")
-    st.button("Browse", key="browse_dest", on_click=_choose_destination_folder)
     st.caption("Subfolder: Month (YYYY-MM)")
     return Path(dest_value)
 
@@ -1271,7 +1255,11 @@ Only one program should use the phone at a time. Close other apps that are readi
 
 
 def main() -> None:
-    st.set_page_config(page_title="Import Photos and Videos", layout="wide")
+    st.set_page_config(
+        page_title="Import Photos and Videos",
+        page_icon=str(Path(__file__).resolve().parent / "img" / "favicon.png"),
+        layout="wide",
+    )
     _init_session_state()
     if not st.session_state.devices_scanned:
         _refresh_devices()
