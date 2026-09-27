@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,15 +14,6 @@ from transfer.mtp_client import iter_folder_files
 from transfer.locate import find_transferred_path
 from transfer.rename import destination_path
 from transfer.settings import TransferSettings
-
-
-@dataclass
-class VerifyResult:
-    status: str
-    missing_count: int = 0
-    verified_count: int = 0
-    error_count: int = 0
-    fingerprint: str = ""
 
 
 def verify_transfer(

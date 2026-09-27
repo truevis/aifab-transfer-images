@@ -54,12 +54,6 @@ def reset_device_cache(*, close_sessions: bool = False) -> None:
     _cache_thread_id = None
 
 
-def refresh_open_device(index: int) -> Any:
-    """Reconnect to the phone and return a fresh device handle."""
-    reset_device_cache(close_sessions=True)
-    return open_device(index)
-
-
 def get_devices() -> list[Any]:
     """Return one stable list of open device handles for this process/thread."""
     global _cached_devices, _cache_thread_id
@@ -136,10 +130,6 @@ def _relative_display_path(full_path: str, storage_name: str) -> str:
     return normalized
 
 
-def get_storage(device: Any) -> Any:
-    return _pick_storage(device)
-
-
 def list_dcim_folders(device: Any) -> list[str]:
     storage = _pick_storage(device)
     dcim = storage.get_path("DCIM")
@@ -192,10 +182,6 @@ def iter_folder_files(device: Any, folder_name: str) -> Iterator[PhoneFile]:
         return
 
     yield from _walk_mtp_files(device, root_path, storage.name, root_path)
-
-
-def count_folder_files(device: Any, folder_name: str) -> int:
-    return sum(1 for _ in iter_folder_files(device, folder_name))
 
 
 def delete_folder(device: Any, folder_name: str) -> None:

@@ -11,7 +11,7 @@ from tkinter import filedialog
 import streamlit as st
 
 from transfer.errors import is_disk_full_error
-from transfer.events import TransferEvent, append_event
+from transfer.events import TransferEvent
 from transfer.importer import ImportStats, import_files
 from transfer.mtp_client import (
     close_device,
@@ -70,11 +70,6 @@ def _init_session_state() -> None:
             st.session_state[key] = value
 
 
-def _set_activity(**kwargs: object) -> None:
-    for key, value in kwargs.items():
-        st.session_state.activity[key] = value
-
-
 def _operation_running() -> bool:
     op = st.session_state.get("operation_control")
     return bool(op and op.running)
@@ -100,9 +95,8 @@ def _finalize_operation(op: OperationControl) -> None:
         st.session_state.verify_status = op.verify_status
         st.session_state.verify_fingerprint = op.verify_fingerprint
         st.session_state.verify_missing_count = op.verify_missing_count
-    if op.transfer_candidates:
-        st.session_state.transfer_candidates = op.transfer_candidates
     if op.preview_fingerprint:
+        st.session_state.transfer_candidates = list(op.transfer_candidates)
         st.session_state.preview_fingerprint = op.preview_fingerprint
     if op.invalidate_verify:
         _invalidate_verify()
@@ -123,20 +117,178 @@ def _launch_operation(worker, *args) -> None:
     threading.Thread(target=worker, args=(op, *args), daemon=True).start()
 
 
+def _finish_operation_if_done(op: OperationControl) -> bool:
+    """Finalize a finished worker and report whether the main script must rerun."""
+    if not op.finished:
+        return False
+    _finalize_operation(op)
+    return True
+
+
+def _fragment_only_run() -> bool:
+    """True when Streamlit is rerunning only this fragment (e.g. run_every)."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        script_ctx = get_script_run_ctx()
+    except Exception:
+        return False
+    return bool(script_ctx and script_ctx.fragment_ids_this_run)
+
+
+def _render_operation_actions(
+    device_index: int,
+    folders: list[str],
+    settings: TransferSettings,
+    device_name: str,
+) -> None:
+    """Start/stop/verify/delete controls — must live inside the operation fragment."""
+    running = _operation_running()
+    with st.container(horizontal=True):
+        if st.button("Start Import", type="primary", key="start_import", disabled=running):
+            st.session_state.operation_error = None
+            if _require_device_and_folders(folders):
+                _launch_operation(
+                    _import_worker,
+                    device_index,
+                    folders,
+                    settings,
+                    device_name,
+                )
+        if st.button(
+            "Stop Import",
+            key="stop_import",
+            disabled=_stop_disabled_for("_import_worker"),
+        ):
+            _request_stop()
+        if st.button("Preview transfer list", key="preview_transfer", disabled=running):
+            st.session_state.operation_error = None
+            if _require_device_and_folders(folders):
+                _launch_operation(
+                    _preview_worker,
+                    device_index,
+                    folders,
+                    settings,
+                    device_name,
+                )
+        if st.button(
+            "Stop Preview",
+            key="stop_preview",
+            disabled=_stop_disabled_for("_preview_worker"),
+        ):
+            _request_stop()
+        if st.button("Verify Transfer", key="verify_transfer", disabled=running):
+            st.session_state.operation_error = None
+            if _require_device_and_folders(folders):
+                _launch_operation(
+                    _verify_worker,
+                    device_index,
+                    folders,
+                    settings,
+                    device_name,
+                )
+        if st.button(
+            "Stop Verify",
+            key="stop_verify",
+            disabled=_stop_disabled_for("_verify_worker"),
+        ):
+            _request_stop()
+        delete_confirmed = st.checkbox(
+            "I confirm these folders are backed up and should be deleted from the phone",
+            value=False,
+            key="delete_confirm",
+            disabled=running,
+        )
+        delete_ok = _delete_enabled(settings, device_name, folders, delete_confirmed)
+        if st.button(
+            "Delete from Phone",
+            key="delete_phone",
+            disabled=not delete_ok or running,
+        ):
+            st.session_state.operation_error = None
+            if _require_device_and_folders(folders):
+                _launch_operation(
+                    _delete_worker,
+                    device_index,
+                    folders,
+                    settings,
+                )
+        if st.button(
+            "Stop Delete",
+            key="stop_delete",
+            disabled=_stop_disabled_for("_delete_worker"),
+        ):
+            _request_stop()
+    delete_reason = _delete_disabled_reason(
+        settings, device_name, folders, delete_confirmed
+    )
+    if delete_reason and not running:
+        st.caption(f"Delete from Phone is disabled: {delete_reason}")
+
+
+def _claim_activity_slots(
+    badge_slot,
+    detail_slot,
+    progress_slot,
+    metrics_slot,
+) -> None:
+    """Reserve outside empties during the full app run for fragment updates."""
+    badge_slot.empty()
+    detail_slot.empty()
+    progress_slot.empty()
+    metrics_slot.empty()
+
+
+def _poll_operation_and_actions(
+    badge_slot,
+    detail_slot,
+    progress_slot,
+    metrics_slot,
+    device_index: int,
+    folders: list[str],
+    settings: TransferSettings,
+    device_name: str,
+) -> bool:
+    """Sync worker UI, reclaim finished ops, render actions. True if just finished."""
+    op = st.session_state.get("operation_control")
+    finished_now = False
+    if op is not None:
+        _sync_operation_to_session(op)
+        finished_now = _finish_operation_if_done(op)
+    # Always write outside slots so fragment run_every can keep updating them.
+    _paint_activity(badge_slot, detail_slot, progress_slot, metrics_slot)
+
+    # Buttons live here so run_every re-enables them when a worker finishes
+    # without depending on a full-app st.rerun() to rewrite outside widgets.
+    _render_operation_actions(device_index, folders, settings, device_name)
+    return finished_now
+
+
 @st.fragment(run_every=timedelta(seconds=0.3))
 def _operation_monitor(
     badge_slot,
     detail_slot,
     progress_slot,
     metrics_slot,
+    device_index: int,
+    folders: list[str],
+    settings: TransferSettings,
+    device_name: str,
 ) -> None:
-    op = st.session_state.get("operation_control")
-    if op is None:
-        return
-    _sync_operation_to_session(op)
-    _paint_activity(badge_slot, detail_slot, progress_slot, metrics_slot)
-    if op.finished:
-        _finalize_operation(op)
+    """Poll workers and keep action buttons in sync with running state."""
+    finished_now = _poll_operation_and_actions(
+        badge_slot,
+        detail_slot,
+        progress_slot,
+        metrics_slot,
+        device_index,
+        folders,
+        settings,
+        device_name,
+    )
+    if finished_now and _fragment_only_run():
+        # Refresh metrics / log / errors rendered outside this fragment.
+        st.rerun(scope="app")
 
 
 def _activity_badge_markdown(mode: str, outcome: str | None) -> str:
@@ -189,22 +341,17 @@ def _paint_activity(
         metrics_slot.empty()
 
 
-def _render_activity_header(
-    badge_slot,
-    detail_slot,
-    progress_slot,
-    metrics_slot,
-) -> None:
-    _paint_activity(badge_slot, detail_slot, progress_slot, metrics_slot)
-
-
-def _browse_folder() -> str | None:
+def _choose_destination_folder() -> None:
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", 1)
-    selected = filedialog.askdirectory()
-    root.destroy()
-    return selected or None
+    try:
+        selected = filedialog.askdirectory()
+    finally:
+        root.destroy()
+    if selected:
+        st.session_state.dest_input = selected
+        _invalidate_verify()
 
 
 def _refresh_devices(*, force_reconnect: bool = False) -> None:
@@ -306,11 +453,7 @@ def _render_source_settings() -> tuple[int, list[str], str, bool, bool, bool]:
 def _render_destination_settings() -> Path:
     st.subheader("Destination")
     dest_value = st.text_input("Folder", value=DEFAULT_DEST, key="dest_input")
-    if st.button("Browse", key="browse_dest"):
-        picked = _browse_folder()
-        if picked:
-            st.session_state.dest_input = picked
-            _invalidate_verify()
+    st.button("Browse", key="browse_dest", on_click=_choose_destination_folder)
     st.caption("Subfolder: Month (YYYY-MM)")
     return Path(dest_value)
 
@@ -487,8 +630,9 @@ def _import_worker(
         show_progress=True,
         outcome=None,
     )
-    device = open_device(device_index)
+    device = None
     try:
+        device = open_device(device_index)
         total_files = 0
         folders_scanned = 0
         folder_count = len(folders)
@@ -535,6 +679,7 @@ def _import_worker(
             )
 
         if user_cancelled:
+            op.invalidate_verify = True
             op.set_activity(
                 mode=ACTIVITY_IDLE,
                 label="Import stopped",
@@ -606,6 +751,7 @@ def _import_worker(
                     outcome="warning",
                 )
     except OSError as exc:
+        op.invalidate_verify = True
         _append_op_event(op, TransferEvent(action="ERROR", source="Import", reason=str(exc)))
         op.set_activity(
             mode=ACTIVITY_IDLE,
@@ -623,6 +769,7 @@ def _import_worker(
             f"Details: {exc}"
         )
     except Exception as exc:
+        op.invalidate_verify = True
         _append_op_event(op, TransferEvent(action="ERROR", source="Import", reason=str(exc)))
         op.set_activity(
             mode=ACTIVITY_IDLE,
@@ -635,7 +782,8 @@ def _import_worker(
         )
         op.error = f"Import failed: {exc}"
     finally:
-        close_device(device)
+        if device is not None:
+            close_device(device)
         op.running = False
         op.finished = True
 
@@ -657,10 +805,11 @@ def _verify_worker(
         show_progress=True,
         outcome=None,
     )
-    device = open_device(device_index)
+    device = None
     checked = 0
     cancelled = False
     try:
+        device = open_device(device_index)
         missing_count = 0
         status: str | None = None
         for event in verify_transfer(
@@ -735,7 +884,8 @@ def _verify_worker(
         )
         op.error = f"Verify failed: {exc}"
     finally:
-        close_device(device)
+        if device is not None:
+            close_device(device)
         op.running = False
         op.finished = True
 
@@ -755,11 +905,12 @@ def _delete_worker(
         show_progress=True,
         outcome=None,
     )
-    device = open_device(device_index)
+    device = None
     total_files = 0
     processed = 0
     cancelled = False
     try:
+        device = open_device(device_index)
         op.set_activity(
             mode=ACTIVITY_DELETING,
             label="Deleting from phone",
@@ -850,7 +1001,8 @@ def _delete_worker(
         )
         op.error = f"Delete failed: {exc}"
     finally:
-        close_device(device)
+        if device is not None:
+            close_device(device)
         op.running = False
         op.finished = True
 
@@ -932,8 +1084,9 @@ def _preview_worker(
         show_progress=True,
         outcome=None,
     )
-    device = open_device(device_index)
+    device = None
     try:
+        device = open_device(device_index)
         op.set_activity(
             mode=ACTIVITY_PREVIEWING,
             label="Previewing transfer list",
@@ -994,7 +1147,8 @@ def _preview_worker(
         )
         op.error = f"Preview failed: {exc}"
     finally:
-        close_device(device)
+        if device is not None:
+            close_device(device)
         op.running = False
         op.finished = True
 
@@ -1109,100 +1263,23 @@ def main() -> None:
         activity_detail = st.empty()
         activity_progress = st.empty()
         activity_metrics = st.empty()
-        _render_activity_header(
+        # Claim during the full app run so fragment-only reruns can update them.
+        _claim_activity_slots(
             activity_badge,
             activity_detail,
             activity_progress,
             activity_metrics,
         )
 
-    running = _operation_running()
-    with st.container(horizontal=True):
-        if st.button("Start Import", type="primary", key="start_import", disabled=running):
-            st.session_state.operation_error = None
-            if _require_device_and_folders(folders):
-                _launch_operation(
-                    _import_worker,
-                    device_index,
-                    folders,
-                    settings,
-                    device_name,
-                )
-        if st.button(
-            "Stop Import",
-            key="stop_import",
-            disabled=_stop_disabled_for("_import_worker"),
-        ):
-            _request_stop()
-        if st.button("Preview transfer list", key="preview_transfer", disabled=running):
-            st.session_state.operation_error = None
-            if _require_device_and_folders(folders):
-                _launch_operation(
-                    _preview_worker,
-                    device_index,
-                    folders,
-                    settings,
-                    device_name,
-                )
-        if st.button(
-            "Stop Preview",
-            key="stop_preview",
-            disabled=_stop_disabled_for("_preview_worker"),
-        ):
-            _request_stop()
-        if st.button("Verify Transfer", key="verify_transfer", disabled=running):
-            st.session_state.operation_error = None
-            if _require_device_and_folders(folders):
-                _launch_operation(
-                    _verify_worker,
-                    device_index,
-                    folders,
-                    settings,
-                    device_name,
-                )
-        if st.button(
-            "Stop Verify",
-            key="stop_verify",
-            disabled=_stop_disabled_for("_verify_worker"),
-        ):
-            _request_stop()
-        delete_confirmed = st.checkbox(
-            "I confirm these folders are backed up and should be deleted from the phone",
-            value=False,
-            key="delete_confirm",
-            disabled=running,
-        )
-        delete_ok = _delete_enabled(settings, device_name, folders, delete_confirmed)
-        if st.button(
-            "Delete from Phone",
-            key="delete_phone",
-            disabled=not delete_ok or running,
-        ):
-            st.session_state.operation_error = None
-            if _require_device_and_folders(folders):
-                _launch_operation(
-                    _delete_worker,
-                    device_index,
-                    folders,
-                    settings,
-                )
-        if st.button(
-            "Stop Delete",
-            key="stop_delete",
-            disabled=_stop_disabled_for("_delete_worker"),
-        ):
-            _request_stop()
-    delete_reason = _delete_disabled_reason(
-        settings, device_name, folders, delete_confirmed
-    )
-    if delete_reason and not running:
-        st.caption(f"Delete from Phone is disabled: {delete_reason}")
-
     _operation_monitor(
         activity_badge,
         activity_detail,
         activity_progress,
         activity_metrics,
+        device_index,
+        folders,
+        settings,
+        device_name,
     )
     if st.session_state.get("operation_error"):
         st.error(st.session_state.operation_error)

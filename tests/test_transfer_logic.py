@@ -20,7 +20,7 @@ from transfer.preview import list_transfer_candidates
 from transfer.datetime_meta import capture_datetime_from_filename, resolve_capture_datetime
 from transfer.errors import is_disk_full_error, is_resource_in_use_error
 from transfer.events import TransferEvent
-from transfer.importer import import_files
+from transfer.importer import ImportStats, import_files
 from transfer.filters import is_video_file
 from transfer.rename import build_filename, destination_path, month_subfolder
 from transfer.mtp_client import PhoneFile
@@ -499,6 +499,72 @@ class TestImportStop(unittest.TestCase):
         self.assertIn("STOPPED", actions)
         self.assertEqual(events[-1].action, "SUMMARY")
         self.assertIn("stopped by user", events[-1].source.lower())
+
+    def test_resume_skips_existing_then_verify_ready(self) -> None:
+        dt = datetime(2026, 6, 8, 19, 14, 27)
+        phone_files = [
+            PhoneFile(
+                content_path="dev/storage/DCIM/Camera/IMG_0001.jpg",
+                display_path="DCIM/Camera/IMG_0001.jpg",
+                filename="IMG_0001.jpg",
+                size=100,
+                date_modified=dt,
+                folder_path="dev/storage/DCIM/Camera",
+            ),
+            PhoneFile(
+                content_path="dev/storage/DCIM/Camera/IMG_0002.jpg",
+                display_path="DCIM/Camera/IMG_0002.jpg",
+                filename="IMG_0002.jpg",
+                size=100,
+                date_modified=dt,
+                folder_path="dev/storage/DCIM/Camera",
+            ),
+        ]
+
+        def fake_download(_device, _content_path, dest_path) -> None:
+            Path(dest_path).write_bytes(b"new-copy")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            existing = destination_path(
+                root,
+                "IMG_0001.jpg",
+                dt,
+                rename_enabled=True,
+                template=DEFAULT_TEMPLATE,
+                ext_lower=True,
+            )
+            existing.parent.mkdir(parents=True, exist_ok=True)
+            existing.write_bytes(b"already-copied")
+
+            settings = TransferSettings(dest_root=root, skip_existing=True)
+            final_stats = ImportStats()
+            with (
+                patch("transfer.importer.mtp_path", return_value="dev/storage/DCIM/Camera"),
+                patch("transfer.importer.iter_folder_files", return_value=phone_files),
+                patch("transfer.importer.download_to_path", side_effect=fake_download),
+            ):
+                import_events = []
+                for event, stats in import_files(object(), ["Camera"], settings):
+                    import_events.append(event)
+                    final_stats = stats
+
+            with patch(
+                "transfer.verify.iter_folder_files",
+                return_value=phone_files,
+            ):
+                verify_events = list(
+                    verify_transfer(object(), ["Camera"], settings, "fp")
+                )
+
+        actions = [event.action for event in import_events]
+        self.assertIn("SKIP", actions)
+        self.assertIn("COPY", actions)
+        self.assertEqual(final_stats.skipped_existing, 1)
+        self.assertEqual(final_stats.copied, 1)
+        result = next(event for event in verify_events if event.action == "_RESULT")
+        self.assertEqual(result.source, "ready")
+        self.assertEqual(result.reason, "0")
 
 
 class TestVerify(unittest.TestCase):
